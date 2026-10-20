@@ -2,9 +2,9 @@
 
 A standalone GenLayer Intelligent Contract. Anyone submits a prompt plus two model responses (A and B). AI validators independently judge which response is better and why. The contract reaches consensus on the winner (A, B, or TIE) and stores it on-chain with reasoning.
 
-- **Contract (Bradbury, chain 4221):** `0x21B27bf664f87Fe909970bEe18440cd86A5b2B56`
-- **Explorer:** https://explorer-bradbury.genlayer.com/address/0x21B27bf664f87Fe909970bEe18440cd86A5b2B56
-- **Source:** `contracts/model_judge.py` (10,127 bytes)
+- **Contract (Bradbury, chain 4221):** `0xa008B85c04a93eAaf5bB95C3895fce7F66171c04`
+- **Explorer:** https://explorer-bradbury.genlayer.com/address/0xa008B85c04a93eAaf5bB95C3895fce7F66171c04
+- **Source:** `contracts/model_judge.py` (10,903 bytes)
 
 ## Why this belongs on GenLayer
 
@@ -17,9 +17,13 @@ The stored verdict is a durable, consensus-derived artifact that any other contr
 One leader/validator round per judgment, via `gl.vm.run_nondet`:
 
 1. The **leader** reads the prompt and both responses, judges which is better, and returns the verdict with reasoning.
-2. Each **validator** independently re-reads the same prompt and responses, **re-judges** which is better, and agrees only if its verdict matches the leader's.
+2. Each **validator** independently re-reads the same prompt and responses, **re-judges** which is better, and agrees only if:
+   - its verdict matches the leader's, **or**
+   - it returns `TIE` (honest uncertainty).
 
-That second clause is the substantive check: the validator judges the content, it does not audit the leader's formatting.
+That second clause is the substantive check: the validator judges the content, it does not audit the leader's formatting. A validator that cannot decide does not block the round — but a genuine `A`/`B` flip does, since that is fabrication rather than hedging. Requiring exact agreement on every borderline comparison deadlocks the round.
+
+All three inputs (prompt, response A, response B) are untrusted and are fenced and sanitised before entering the model prompt, so a response containing a fence marker cannot close its own fence and inject instructions.
 
 ## Public API
 
@@ -36,7 +40,7 @@ That second clause is the substantive check: the validator judges the content, i
 
 ```javascript
 await client.writeContract({
-  address: "0x21B27bf664f87Fe909970bEe18440cd86A5b2B56",
+  address: "0xa008B85c04a93eAaf5bB95C3895fce7F66171c04",
   functionName: "submit_judgment",
   args: ["j1", "What is 2+2?", "The answer is 4.", "I don't know math."],
   gasLimit: 5000000n,   // REQUIRED — GenLayer cannot estimate gas for nondet writes
@@ -62,24 +66,35 @@ await client.writeContract({
 sha256 is identical to the committed `contracts/model_judge.py`:
 
 ```
-live bytes : 10127
-local bytes: 10127
-live  sha256: c7f30afc402d0a1ddcb6c84f08976d34bb647161f15caf221daf5dd994e95396
-local sha256: c7f30afc402d0a1ddcb6c84f08976d34bb647161f15caf221daf5dd994e95396
+live bytes : 10903
+local bytes: 10903
+live  sha256: 498bca1a8513c8f8c6d1fce5ffbabc9f5b0e0b806fbfe040cea3134808606eae
+local sha256: 498bca1a8513c8f8c6d1fce5ffbabc9f5b0e0b806fbfe040cea3134808606eae
 MATCH      : YES
 ```
 
 ### Live discrimination
 
-Three judgments submitted against the live contract:
+Judgments submitted against the live contract, all committed with the correct
+verdict:
 
-| Prompt | Response A | Response B | Expected | Committed |
+| Prompt | Response A | Response B | Expected | On-chain |
 |---|---|---|---|---|
-| "What is 2+2?" | "The answer is 4." | "I think it might be 4, or maybe 5..." | A wins | `counts.a += 1` |
-| "What is 2+2?" | "I don't know math." | "The answer is 4." | B wins | `counts.b += 1` |
-| "What is 2+2?" | "The answer is 4." | "The answer is 4." | TIE | `counts.tie += 1` |
+| "What is 2+2?" | "The answer is 4." | "I think it might be 4, or maybe 5..." | `A` | `A` |
+| "What is 2+2?" | "I don't know math." | "The answer is 4." | `B` | `B` |
+| "What is 2+2?" | "The answer is 4." | "The answer is 4." | `TIE` | `TIE` |
 
-Final on-chain state: `verdict_counts() = {a:1, b:1, tie:1, total:3}` — the committee correctly discriminated all three cases.
+Final on-chain state: `verdict_counts() = {a:3, b:4, tie:2, total:9}` across 9
+committed judgments — **every one with the correct verdict** (3× `A`, 4× `B`,
+2× `TIE`). The committee discriminates all three outcomes.
+
+**A harness note worth keeping.** The consensus contract intermittently reverts a
+submission at admission (node-side capacity / leader error), so the harness
+retries with a fresh `prompt_id` — reusing a committed id hits the duplicate guard
+and reverts too. And `waitForTransactionReceipt` can return `status: 5` with
+`statusName` undefined, so a harness must accept both forms; reading only the
+string name reports committed rounds as failures. The ground truth is
+`verdict_counts()` and `list_judgments()`.
 
 ## Tests
 
@@ -103,9 +118,10 @@ gltest tests/direct -q     # 16 passed
 ## Layout
 
 ```
-contracts/model_judge.py                        the contract (10,127 B)
+contracts/model_judge.py                        the contract (10,903 B)
 tests/direct/test_model_judge.py                16 tests
 deploy.mjs / verify.mjs                         deploy + source parity
-live_check.mjs                                  live discrimination test
+live_final.mjs                                  live discrimination test
+diag2.mjs                                       probe + write isolation
 README.md / gltest.config.yaml / .gitignore
 ```

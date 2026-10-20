@@ -10,7 +10,7 @@ import { testnetBradbury } from "genlayer-js/chains";
 import { readFileSync } from "fs";
 import { Wallet } from "ethers";
 
-const ADDR = "0x21B27bf664f87Fe909970bEe18440cd86A5b2B56";
+const ADDR = "0xbE760bec3EeBbc3e86Ef67B3F38D4d9C0A3250f4";
 const KS = "/home/administrator/.genlayer/keystores/user_wallet.json";
 const wallet = Wallet.fromEncryptedJsonSync(readFileSync(KS, "utf8"), process.env.GLPASS);
 const client = createClient({ chain: testnetBradbury, account: createAccount(wallet.privateKey) });

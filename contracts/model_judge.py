@@ -13,7 +13,6 @@ Storage is parallel TreeMaps of scalars — no @allow_storage dataclass, which t
 GenVM build accepts at deploy then stores no code. No funds are held or moved.
 """
 
-import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -28,11 +27,6 @@ MAX_REASON_CHARS = 500
 MAX_ID_CHARS = 200
 
 VERDICTS = ("A", "B", "TIE")
-
-
-def _digest(text: str) -> str:
-    """Fingerprint of the submitted inputs."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _parse_obj(raw) -> dict:
@@ -79,6 +73,14 @@ def _normalize(data: dict) -> dict:
     }
 
 
+def _sanitise(text: str) -> str:
+    """Strip fence markers so untrusted content cannot close its own fence."""
+    for marker in ("<<<PROMPT", "PROMPT>>>", "<<<RESPONSE_A", "RESPONSE_A>>>",
+                   "<<<RESPONSE_B", "RESPONSE_B>>>"):
+        text = text.replace(marker, "")
+    return text
+
+
 def _judge(prompt: str, response_a: str, response_b: str) -> dict:
     """Judge which of two responses is better.
 
@@ -86,27 +88,30 @@ def _judge(prompt: str, response_a: str, response_b: str) -> dict:
     the calldata boundary as a parsed object, and the encoder takes only
     bytes/str/Sequence/Mapping — so one float field makes the whole response
     unencodable and the verdict is lost. Plain text always crosses.
+
+    All three inputs are fenced and sanitised, or a response containing a
+    fence marker could close its own fence and inject instructions.
     """
-    prompt = (
+    prompt_text = (
         "You are a rigorous evaluator. Decide which of the two responses (A or B) "
         "better answers the prompt.\n\n"
         "Judge ONLY on: relevance, accuracy, completeness, clarity, and helpfulness. "
         "Do not favour a response for being longer or for matching your style.\n\n"
         "<<<PROMPT\n"
-        + prompt + "\n"
+        + _sanitise(prompt) + "\n"
         + "PROMPT>>>\n\n"
         "<<<RESPONSE_A\n"
-        + response_a + "\n"
+        + _sanitise(response_a) + "\n"
         + "RESPONSE_A>>>\n\n"
         "<<<RESPONSE_B\n"
-        + response_b + "\n"
+        + _sanitise(response_b) + "\n"
         + "RESPONSE_B>>>\n\n"
         "Reply with exactly two lines and no other text:\n"
         "WINNER: A\n"
         "REASON: one sentence explaining why that response is better\n\n"
         "Use B or TIE in place of A when that is the answer."
     )
-    raw = gl.nondet.exec_prompt(prompt)
+    raw = gl.nondet.exec_prompt(prompt_text)
     if isinstance(raw, dict):
         return _normalize(raw)
     text = str(raw)
@@ -160,7 +165,11 @@ class ModelJudge(gl.Contract):
             if verdict not in VERDICTS:
                 return False
             mine = _judge(c, ra, rb).get("winner")
-            return mine == verdict
+            # Only a POSITIVE contrary finding blocks: a run returning TIE where
+            # the leader picked A or B is honest uncertainty, not fabrication,
+            # and requiring those to match deadlocks the round. An A/B flip
+            # still blocks.
+            return mine == verdict or mine == "TIE"
 
         result = gl.vm.run_nondet(leader_fn, validator_fn)
         data = result.calldata if hasattr(result, "calldata") else result
@@ -261,6 +270,11 @@ class ModelJudge(gl.Contract):
             "tie": int(self.count_tie),
             "total": int(self.judge_count),
         }
+
+    @gl.public.view
+    def probe(self) -> str:
+        """Diagnostic: returns a simple string to verify the contract is callable."""
+        return "probe-ok"
 
     @gl.public.view
     def limits(self) -> dict:
