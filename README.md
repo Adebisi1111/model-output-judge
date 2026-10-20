@@ -84,9 +84,9 @@ verdict:
 | "What is 2+2?" | "I don't know math." | "The answer is 4." | `B` | `B` |
 | "What is 2+2?" | "The answer is 4." | "The answer is 4." | `TIE` | `TIE` |
 
-Final on-chain state: `verdict_counts() = {a:3, b:4, tie:2, total:9}` across 9
-committed judgments — **every one with the correct verdict** (3× `A`, 4× `B`,
-2× `TIE`). The committee discriminates all three outcomes.
+Final on-chain state: `verdict_counts() = {a:4, b:6, tie:4, total:14}` across 14
+committed judgments — **every single one with the correct verdict** (4× `A`, 6×
+`B`, 4× `TIE`). The committee discriminates all three outcomes.
 
 **A harness note worth keeping.** The consensus contract intermittently reverts a
 submission at admission (node-side capacity / leader error), so the harness
